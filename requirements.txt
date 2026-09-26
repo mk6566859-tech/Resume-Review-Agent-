@@ -1,0 +1,6 @@
+streamlit==1.32.2
+crewai==0.80.0
+crewai-tools==0.17.0
+embedchain==0.1.114
+litellm==1.55.12
+pypdf==4.1.0
