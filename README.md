@@ -37,8 +37,9 @@ Dependencies are pinned in `requirements.txt`:
 - `embedchain==0.1.114`
 - `litellm==1.55.12`
 - `pypdf==4.1.0`
+- `setuptools==80.9.0`
 
-The companion-package pins keep CrewAI's transitive dependencies compatible with the requested `pypdf==4.1.0`. LiteLLM is pinned because it provides CrewAI's Groq integration and the app's API error types. The default model is `openai/gpt-oss-120b`. Groq model availability can change: check the Groq Console's production model list before deploying, and set `GROQ_MODEL` to an active model if needed.
+The companion-package pins keep CrewAI's transitive dependencies compatible with the requested `pypdf==4.1.0`. `setuptools` is pinned because CrewAI 0.80 imports `pkg_resources`, which was removed from newer setuptools releases. LiteLLM provides CrewAI's Groq integration and the app's API error types. The default model is `openai/gpt-oss-120b`. Groq model availability can change: check the Groq Console's production model list before deploying, and set `GROQ_MODEL` to an active model if needed.
 
 ## Run locally
 
