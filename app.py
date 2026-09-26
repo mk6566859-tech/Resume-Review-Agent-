@@ -10,7 +10,6 @@ from crewai import Agent, Crew, LLM, Process, Task
 from litellm.exceptions import APIConnectionError, APIError, AuthenticationError, RateLimitError, Timeout
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from streamlit.errors import StreamlitSecretNotFoundError
 
 
 logging.basicConfig(level=logging.INFO)
@@ -152,7 +151,7 @@ def read_settings() -> tuple[str, str, str | None]:
     try:
         api_key = str(st.secrets.get("GROQ_API_KEY", "")).strip()
         model = str(st.secrets.get("GROQ_MODEL", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    except (StreamlitSecretNotFoundError, KeyError, TypeError):
+    except (FileNotFoundError, KeyError, TypeError):
         return "", DEFAULT_MODEL, "Add GROQ_API_KEY to Streamlit secrets before requesting a review."
 
     if not api_key:
