@@ -38,6 +38,7 @@ Dependencies are pinned in `requirements.txt`:
 - `litellm==1.55.12`
 - `pypdf==4.1.0`
 - `setuptools==80.9.0`
+- `reportlab==4.2.5`
 
 The companion-package pins keep CrewAI's transitive dependencies compatible with the requested `pypdf==4.1.0`. `setuptools` is pinned because CrewAI 0.80 imports `pkg_resources`, which was removed from newer setuptools releases. LiteLLM provides CrewAI's Groq integration and the app's API error types. The default model is `openai/gpt-oss-120b`. Groq model availability can change: check the Groq Console's production model list before deploying, and set `GROQ_MODEL` to an active model if needed.
 
@@ -131,4 +132,4 @@ Replace the GitHub URL with your own repository address.
 2. You paste a job description and submit both inputs.
 3. The app checks for missing content, unreadable/empty PDFs, oversize files, and missing secrets.
 4. A single CrewAI agent receives both texts with strict instructions to distinguish evidence from unknowns.
-5. The app displays the nine review sections and offers a Markdown download. API failures are translated into clear messages rather than shown as stack traces.
+5. The app displays the nine review sections and offers a formatted PDF download. API failures are translated into clear messages rather than shown as stack traces.

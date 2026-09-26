@@ -4,12 +4,26 @@ import io
 import logging
 import re
 from typing import Final
+from xml.sax.saxutils import escape
 
 import streamlit as st
 from crewai import Agent, Crew, LLM, Process, Task
 from litellm.exceptions import APIConnectionError, APIError, AuthenticationError, RateLimitError, Timeout
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    HRFlowable,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -293,14 +307,197 @@ describes the candidate. In the action plan, prioritize up to five changes and e
     return report
 
 
+def markdown_to_pdf_markup(text: str) -> str:
+    safe_text = escape(text.encode("cp1252", "replace").decode("cp1252"))
+    safe_text = re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', safe_text)
+    safe_text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe_text)
+    safe_text = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", safe_text)
+    return safe_text
+
+
+def markdown_table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def create_review_pdf(report: str) -> bytes:
+    """Render the structured Markdown review as a styled, downloadable PDF."""
+    output = io.BytesIO()
+    page_width, _ = A4
+    left_margin = 19 * mm
+    right_margin = 19 * mm
+    usable_width = page_width - left_margin - right_margin
+    ink = colors.HexColor("#34251D")
+    muted = colors.HexColor("#705C4E")
+    accent = colors.HexColor("#A96642")
+    pale_brown = colors.HexColor("#F3E9DF")
+
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle(
+        "ReviewBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9.5,
+        leading=14,
+        textColor=ink,
+        spaceAfter=5,
+        splitLongWords=True,
+    )
+    heading_style = ParagraphStyle(
+        "ReviewHeading",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        leading=18,
+        textColor=ink,
+        spaceBefore=13,
+        spaceAfter=7,
+        keepWithNext=True,
+    )
+    bullet_style = ParagraphStyle(
+        "ReviewBullet",
+        parent=body_style,
+        leftIndent=13,
+        firstLineIndent=-9,
+        spaceAfter=4,
+    )
+    table_header_style = ParagraphStyle(
+        "ReviewTableHeader",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=colors.white,
+        spaceAfter=0,
+    )
+    table_cell_style = ParagraphStyle(
+        "ReviewTableCell",
+        parent=body_style,
+        fontSize=8,
+        leading=10,
+        spaceAfter=0,
+    )
+
+    story = [
+        Paragraph("Resume Review", ParagraphStyle(
+            "DocumentTitle",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=23,
+            leading=28,
+            alignment=TA_LEFT,
+            textColor=ink,
+            spaceAfter=4,
+        )),
+        Paragraph(
+            "Evidence-based comparison and improvement recommendations",
+            ParagraphStyle(
+                "DocumentSubtitle",
+                parent=body_style,
+                textColor=muted,
+                fontSize=10,
+                spaceAfter=12,
+            ),
+        ),
+        HRFlowable(width="100%", thickness=1.5, color=accent, spaceAfter=12),
+    ]
+
+    lines = report.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line:
+            index += 1
+            continue
+        if line.startswith("|"):
+            table_lines: list[str] = []
+            while index < len(lines) and lines[index].strip().startswith("|"):
+                table_lines.append(lines[index].strip())
+                index += 1
+            rows = [markdown_table_cells(row) for row in table_lines]
+            rows = [
+                row
+                for row in rows
+                if not all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in row)
+            ]
+            if rows:
+                column_count = max(len(row) for row in rows)
+                table_data = []
+                for row_index, row in enumerate(rows):
+                    row += [""] * (column_count - len(row))
+                    cell_style = table_header_style if row_index == 0 else table_cell_style
+                    table_data.append([
+                        Paragraph(markdown_to_pdf_markup(cell), cell_style)
+                        for cell in row
+                    ])
+                table = Table(
+                    table_data,
+                    colWidths=[usable_width / column_count] * column_count,
+                    repeatRows=1,
+                    hAlign="LEFT",
+                )
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), accent),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, pale_brown]),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D8C8BA")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                story.extend([table, Spacer(1, 7)])
+            continue
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+            story.append(Paragraph(markdown_to_pdf_markup(heading), heading_style))
+        elif re.match(r"^[-*]\s+", line):
+            story.append(Paragraph("&#8226; " + markdown_to_pdf_markup(re.sub(r"^[-*]\s+", "", line)), bullet_style))
+        elif re.match(r"^\d+[.)]\s+", line):
+            number = re.match(r"^(\d+)[.)]\s+", line)
+            assert number is not None
+            content = re.sub(r"^\d+[.)]\s+", "", line)
+            story.append(Paragraph(f"{number.group(1)}. {markdown_to_pdf_markup(content)}", bullet_style))
+        else:
+            story.append(Paragraph(markdown_to_pdf_markup(line), body_style))
+        index += 1
+
+    def add_page_number(canvas, document) -> None:
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#D8C8BA"))
+        canvas.line(left_margin, 14 * mm, page_width - right_margin, 14 * mm)
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawString(left_margin, 9 * mm, "Resume Review Studio")
+        canvas.drawRightString(
+            page_width - right_margin,
+            9 * mm,
+            f"Page {document.page}",
+        )
+        canvas.restoreState()
+
+    document = SimpleDocTemplate(
+        output,
+        pagesize=A4,
+        rightMargin=right_margin,
+        leftMargin=left_margin,
+        topMargin=18 * mm,
+        bottomMargin=21 * mm,
+        title="Resume Review",
+        author="Resume Review Studio",
+    )
+    document.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
+    return output.getvalue()
+
+
 def show_report(report: str) -> None:
     st.markdown("### Your evidence-based review")
     st.markdown(report)
     st.download_button(
-        "Download review as Markdown",
-        data=report,
-        file_name="resume-review.md",
-        mime="text/markdown",
+        "Download review as PDF",
+        data=create_review_pdf(report),
+        file_name="resume-review.pdf",
+        mime="application/pdf",
         use_container_width=True,
     )
 
